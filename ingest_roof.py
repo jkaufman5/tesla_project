@@ -29,10 +29,8 @@ def main():
         .getOrCreate()
     )
 
-    # TODO modify location
-    base_dir = (
-        "/Users/jkaufman/Downloads/Tesla interviews/kaufman_tesla_project/roof_data"
-    )
+    # Relative path
+    base_dir = "roof_data"
     roof_json_data_files = list()
 
     # Iterate and fix JSON files as needed to be in consistent format
@@ -501,19 +499,18 @@ def main():
         site_model_obstruction_ring_edge=site_model_obstruction_ring_edge_df,
     )
 
-    # TODO change
-    output_dir = (
-        "/Users/jkaufman/Downloads/Tesla interviews/kaufman_tesla_project/output_tables"
-    )
+    # Relative path
+    output_dir = "output_data"
 
-    # Simulate writing dataframes out to tables by writing locally to CSV
-    for file_name, df in roof_dfs.items():
+    # Simulate writing dataframes out to tables by writing locally as CSV
+    for output_sub_folder, df in roof_dfs.items():
         (
+            # One file per dataframe
             df.coalesce(1)
             .write.mode("overwrite")
             .option("header", "true")
             .option("delimiter", ",")
-            .csv(f"{output_dir}/{file_name}")
+            .csv(f"{output_dir}/{output_sub_folder}")
         )
 
 
