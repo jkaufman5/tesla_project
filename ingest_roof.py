@@ -569,7 +569,7 @@ def write_to_file(
     output_dir = "output_data"
 
     for output_sub_folder, df in table_names_and_dfs.items():
-        logger.info("Writing out data to %s" % output_sub_folder)
+        logger.info("Writing out data to %s/" % output_sub_folder)
         (
             # One output file per dataframe due to small size
             df.coalesce(1)
