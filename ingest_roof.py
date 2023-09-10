@@ -1,7 +1,20 @@
 import os
 import json
+import logging
+from typing import Dict, List, NoReturn
+from datetime import datetime
 
 from pyspark.sql import SparkSession, DataFrame, functions as F
+
+
+def get_spark_session() -> SparkSession:
+    spark = (
+        SparkSession.builder.master("local")
+        .appName("tesla_roof_ingestion")
+        .getOrCreate()
+    )
+
+    return spark
 
 
 def fix_string_nulls(df: DataFrame) -> DataFrame:
@@ -21,20 +34,15 @@ def fix_string_nulls(df: DataFrame) -> DataFrame:
     return df
 
 
-def main():
-    # TODO do we need this?
-    spark = (
-        SparkSession.builder.master("local")
-        .appName("tesla_roof_ingestion")
-        .getOrCreate()
-    )
+def fix_json_files(base_dir: str, logger: logging.Logger) -> List[str]:
+    """
+    Iterate and fix JSON files, as needed, to be in the expected/consistent structure.
+    In a real-world scenario, this should be preferably fixed upstream with the process that produces the JSON.
 
-    # Relative path
-    base_dir = "roof_data"
+    Return a list of json file names for those files to be read in
+    """
     roof_json_data_files = list()
 
-    # Iterate and fix JSON files as needed to be in consistent format
-    # (In a real-world scenario, it is preferred for this to be fixed upstream with the process that produces the JSON)
     for roof_data_file_name in os.listdir(base_dir):
         if (
             roof_data_file_name.endswith(".json")
@@ -47,11 +55,11 @@ def main():
                 json_dict = json.load(open(json_path))
                 json_str = json.dumps(json_dict)
             except ValueError as v:
-                print(
+                logger.info(
                     "The file, %s, contains malformed JSON; skipping parsing this file."
                     % roof_data_file_name
                 )
-                print(v)
+                logger.info(v)
                 continue
 
             save_modified_copy = False
@@ -79,33 +87,46 @@ def main():
 
             if save_modified_copy:
                 new_file_name = f"{roof_data_file_name.split('.')[0]}_fixed.json"
-                #
+
                 with open(f"{base_dir}/{new_file_name}", "w") as new_file:
                     json.dump(json.loads(json_str), new_file)
-                #
+
                 roof_json_data_files.append(new_file_name)
             else:
                 roof_json_data_files.append(roof_data_file_name)
 
-    # In initial review, roof_8.json is a good reference to determine expected JSON structure
+
+def read_and_parse_json_data(
+    spark: SparkSession, base_dir: str, json_files: List[str], logger: logging.Logger
+) -> Dict[str, DataFrame]:
+    """
+    Iterate to read in each JSON file,
+    parse/split into separate Spark dataframes,
+    and return as a dictionary
+
+    E.g.,
+    {
+        "table_name1":
+        df1
+    }
+    """
+    # In manual review, roof_8.json is a good candidate to determine the expected JSON structure
     roof_data_df = (
         spark.read.json(f"{base_dir}/roof_8.json")
         .limit(0)
         .withColumn("source_file_name", F.lit(""))
     )
 
-    # Read in JSON files as a Spark dataframe
-    for iteration, roof_data_file_name in enumerate(
-        iterable=roof_json_data_files, start=1
-    ):
+    # Iterate to read each JSON file a Spark dataframe and union together
+    for iteration, roof_data_file_name in enumerate(iterable=json_files, start=1):
         json_path = f"{base_dir}/{roof_data_file_name}"
-        print("%s: Preparing to read %s" % (iteration, roof_data_file_name))
+        logger.info("%s: Preparing to read %s" % (iteration, roof_data_file_name))
 
         json_file_df = spark.read.json(
             path=json_path, schema=roof_data_df.schema
         ).withColumn("source_file_name", F.lit(roof_data_file_name))
 
-        # Append
+        # Union/append base df
         roof_data_df = roof_data_df.union(json_file_df)
 
     # 9 records from 9 non-malformed JSON files
@@ -499,19 +520,44 @@ def main():
         site_model_obstruction_ring_edge=site_model_obstruction_ring_edge_df,
     )
 
+    return roof_dfs
+
+
+def write_to_file(table_names_and_dfs: Dict[str, DataFrame]) -> NoReturn:
+    """
+    Simulate writing each dataframe to a table by instead writing locally as CSV
+    """
     # Relative path
     output_dir = "output_data"
 
-    # Simulate writing dataframes out to tables by writing locally as CSV
-    for output_sub_folder, df in roof_dfs.items():
+    for output_sub_folder, df in table_names_and_dfs.items():
         (
-            # One file per dataframe
+            # One output file per dataframe due to small size
             df.coalesce(1)
             .write.mode("overwrite")
             .option("header", "true")
             .option("delimiter", ",")
             .csv(f"{output_dir}/{output_sub_folder}")
         )
+
+
+def main():
+    start_time = datetime.now()
+
+    spark = get_spark_session()
+    logger = logging.getLogger("ingest_roof")
+    # Relative path
+    base_dir = "roof_data"
+
+    json_file_list = fix_json_files(base_dir=base_dir, logger=logger)
+    names_and_dfs = read_and_parse_json_data(
+        spark=spark, base_dir=base_dir, json_files=json_file_list
+    )
+    write_to_file(table_names_and_dfs=names_and_dfs)
+
+    end_time = datetime.now()
+    execution_time = round(number=(end_time - start_time).total_seconds(), ndigits=2)
+    logger.info("Total execution time: %s" % execution_time)
 
 
 if __name__ == "__main__":
