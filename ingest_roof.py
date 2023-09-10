@@ -19,6 +19,10 @@ def get_spark_session() -> SparkSession:
 
 def get_logger() -> logging.Logger:
     logger = logging.getLogger("ingest_roof")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S",
+    )
 
     # File handler
     log_file = "ingest_roof.log"
@@ -93,8 +97,8 @@ def fix_and_stage_son_files(
                 )
                 file_name = f"{roof_data_file_name.split('.')[0]}_fixed.json"
             else:
-                logger.info("Staging %s" % file_name)
                 file_name = roof_data_file_name
+                logger.info("Staging %s" % file_name)
 
             # Stage file
             with open(f"{new_source_base_dir}/{file_name}", "w") as file:
@@ -593,7 +597,7 @@ def main():
 
     end_time = datetime.now()
     execution_time = round(number=(end_time - start_time).total_seconds(), ndigits=2)
-    logger.info("Total execution time: %s" % execution_time)
+    logger.info("Total execution time: %s seconds." % execution_time)
 
 
 if __name__ == "__main__":
