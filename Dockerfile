@@ -15,5 +15,5 @@ COPY . /app
 # RUN pip install pyspark
 RUN pip install -r requirements.txt
 
-# Submit Spark job
+# Submit Spark job and set where output logs live
 CMD ["spark-submit", "ingest_roof.py"]

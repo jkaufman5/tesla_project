@@ -18,18 +18,22 @@ def get_spark_session() -> SparkSession:
 
 
 def get_logger() -> logging.Logger:
-    logger = logging.getLogger("ingest_roof")
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S",
+        format="%(asctime)s - %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
+    logger = logging.getLogger("ingest_roof")
 
     # File handler
-    log_file = "ingest_roof.log"
-    file_handler = logging.FileHandler(log_file)
+    current_ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    log_file = f"ingest_roof_{current_ts}.log"
+    file_handler = logging.FileHandler(filename=log_file)
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(
-        logging.Formatter("%(asctime)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S")
+        logging.Formatter(
+            "%(asctime)s - %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        )
     )
 
     logger.addHandler(file_handler)
@@ -37,14 +41,14 @@ def get_logger() -> logging.Logger:
     return logger
 
 
-def fix_and_stage_son_files(
+def fix_and_stage_json_files(
     source_base_dir: str, new_source_base_dir: str, logger: logging.Logger
 ) -> NoReturn:
     """
-    Iterate and fix JSON files, as needed, to be in the expected/consistent structure.
-    In a real-world scenario, this should be fixed upstream; thus, this step should not be necessary.
+    Iterate and, as needed, fix JSON files to be in the expected format.
+    In a real-world scenario, this should be fixed upstream.
 
-    Stage copy of JSON files (fixed as needed) in separate directory
+    Stage a copy of the JSON files in a separate location
     """
     if not os.path.exists(path=new_source_base_dir):
         os.makedirs(name=new_source_base_dir)
@@ -63,9 +67,9 @@ def fix_and_stage_son_files(
                     % roof_data_file_name
                 )
                 logger.info(
-                    "Please reach out to the upstream team and have this fixed!"
+                    "  - Please reach out to the upstream team and have this fixed!"
                 )
-                logger.info(v)
+                logger.info("  - Error details: %s" % str(v))
                 continue
 
             save_modified_copy = False
@@ -104,7 +108,9 @@ def fix_and_stage_son_files(
             with open(f"{new_source_base_dir}/{file_name}", "w") as file:
                 json.dump(json.loads(json_str), file)
 
-        logger.info("All JSON files have been staged.")
+    logger.info("********************************")
+    logger.info("All JSON files have been staged.")
+    logger.info("********************************")
 
 
 def fix_string_nulls(df: DataFrame) -> DataFrame:
@@ -150,7 +156,7 @@ def read_and_parse_json_data(
         iterable=os.listdir(base_dir), start=1
     ):
         json_path = f"{base_dir}/{roof_data_file_name}"
-        logger.info("%s: Preparing to read %s" % (iteration, roof_data_file_name))
+        logger.info("%s: Reading and parsing %s" % (iteration, roof_data_file_name))
 
         json_file_df = spark.read.json(
             path=json_path, schema=roof_data_df.schema
@@ -573,7 +579,9 @@ def write_to_file(
             .csv(f"{output_dir}/{output_sub_folder}")
         )
 
+    logger.info("***************************************")
     logger.info("All data has been written successfully.")
+    logger.info("***************************************")
 
 
 def main():
@@ -585,7 +593,7 @@ def main():
     source_base_dir = "roof_data"
     new_source_base_dir = "roof_data_fixed"
 
-    fix_and_stage_son_files(
+    fix_and_stage_json_files(
         source_base_dir=source_base_dir,
         new_source_base_dir=new_source_base_dir,
         logger=logger,
