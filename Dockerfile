@@ -1,19 +1,26 @@
-#!/bin/bash
+# FROM python:3.8-slim
+# FROM apache/spark-py:v3.4.0
+FROM python:3.8-buster
 
-FROM python:3.10-slim
+# Install Java and set JAVA_HOME
+RUN apt-get update && apt-get install -y openjdk-11-jdk && \
+    export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 && \
+    export PATH=$JAVA_HOME/bin:$PATH
 
+# Set container working dir
 WORKDIR /app
-
-# TODO Install Java
-RUN apt-get update && apt-get install -y openjdk-8-jdk
 
 # Copy all contents in the current folder into the container under /app/
 COPY . /app
 
-# Install necessary packages (in this case, pyspark)
-RUN pip install -r requirements.txt
+# Install Python
+# RUN apt-get update && apt-get install -y python3
 
-ENV PYSPARK_PYTHON=python
+# Install necessary packages
+RUN pip install pyspark
+
+# Define env variable for PySpark
+# ENV PYSPARK_PYTHON=python
 
 # Submit Spark job
 CMD ["spark-submit", "ingest_roof.py"]

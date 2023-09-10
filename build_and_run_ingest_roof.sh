@@ -1,7 +1,11 @@
 #!/bin/bash
 
-# Build
-docker build -t ingest-roof-container .
+IMAGE="ingest_roof_image"
+# CONTAINER="ingest_roof_container"
 
-# Run
-docker run -v "$(pwd)":/app ingest-roof-container
+# Build Docker image
+docker build -t $IMAGE .
+
+# Run Docker container
+docker run -v "$(pwd)":/app $IMAGE
+# docker run --name $CONTAINER -d $IMAGE
