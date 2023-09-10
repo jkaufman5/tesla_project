@@ -1,4 +1,4 @@
-FROM python:3.8-buster
+FROM python:3.11-buster
 
 # Install Java and set JAVA_HOME
 RUN apt-get update && apt-get install -y openjdk-11-jdk && \

@@ -1,0 +1,12 @@
+The file, roof_9.json, contains malformed JSON; skipping parsing this file.
+Expecting property name enclosed in double quotes: line 1 column 21854 (char 21853)
+1: Preparing to read roof_6_fixed.json
+2: Preparing to read roof_7.json
+3: Preparing to read roof_1.json
+4: Preparing to read roof_3.json
+5: Preparing to read roof_2_fixed.json
+6: Preparing to read roof_10.json
+7: Preparing to read roof_5.json
+8: Preparing to read roof_4.json
+9: Preparing to read roof_8.json
+Total execution time: 23.74

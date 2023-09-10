@@ -6,4 +6,4 @@ IMAGE="ingest_roof_image"
 docker build -t $IMAGE .
 
 # Run Docker container
-docker run -v "$(pwd)":/app $IMAGE
+docker run -v "$(pwd)":/app $IMAGE 2>&1

@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from typing import Dict, List, NoReturn
+from typing import Dict, NoReturn
 from datetime import datetime
 
 from pyspark.sql import SparkSession, DataFrame, functions as F
@@ -17,47 +17,49 @@ def get_spark_session() -> SparkSession:
     return spark
 
 
-def fix_string_nulls(df: DataFrame) -> DataFrame:
-    """
-    Replace potential str representations of NULL with actual NULL
-    for all string columns
-    """
-    for column_name, data_type in df.dtypes:
-        if data_type == "string":
-            df = df.withColumn(
-                column_name,
-                F.when(
-                    condition=F.lower(F.col(column_name)).isin(["none", "null"]),
-                    value=None,
-                ).otherwise(F.col(column_name)),
-            )
-    return df
+def get_logger() -> logging.Logger:
+    logger = logging.getLogger("ingest_roof")
+
+    # File handler
+    log_file = "ingest_roof.log"
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S")
+    )
+
+    logger.addHandler(file_handler)
+
+    return logger
 
 
-def fix_json_files(base_dir: str, logger: logging.Logger) -> List[str]:
+def fix_and_stage_son_files(
+    source_base_dir: str, new_source_base_dir: str, logger: logging.Logger
+) -> NoReturn:
     """
     Iterate and fix JSON files, as needed, to be in the expected/consistent structure.
-    In a real-world scenario, this should be preferably fixed upstream with the process that produces the JSON.
+    In a real-world scenario, this should be fixed upstream; thus, this step should not be necessary.
 
-    Return a list of json file names for those files to be read in
+    Stage copy of JSON files (fixed as needed) in separate directory
     """
-    roof_json_data_files = list()
+    if not os.path.exists(path=new_source_base_dir):
+        os.makedirs(name=new_source_base_dir)
 
-    for roof_data_file_name in os.listdir(base_dir):
-        if (
-            roof_data_file_name.endswith(".json")
-            and "_fixed" not in roof_data_file_name
-        ):
+    for roof_data_file_name in os.listdir(source_base_dir):
+        if roof_data_file_name.endswith(".json"):
             # For a real-world scenario, I would fail the job with a helpful message and notify the upstream team.
             # However, For the purposes of this project, we will skip the bad file and print a warning message
             try:
-                json_path = f"{base_dir}/{roof_data_file_name}"
+                json_path = f"{source_base_dir}/{roof_data_file_name}"
                 json_dict = json.load(open(json_path))
                 json_str = json.dumps(json_dict)
             except ValueError as v:
                 logger.info(
-                    "The file, %s, contains malformed JSON; skipping parsing this file."
+                    "The file, %s, contains malformed JSON; skipping this file."
                     % roof_data_file_name
+                )
+                logger.info(
+                    "Please reach out to the upstream team and have this fixed!"
                 )
                 logger.info(v)
                 continue
@@ -86,28 +88,50 @@ def fix_json_files(base_dir: str, logger: logging.Logger) -> List[str]:
                 save_modified_copy = True
 
             if save_modified_copy:
-                new_file_name = f"{roof_data_file_name.split('.')[0]}_fixed.json"
-
-                with open(f"{base_dir}/{new_file_name}", "w") as new_file:
-                    json.dump(json.loads(json_str), new_file)
-
-                roof_json_data_files.append(new_file_name)
+                logger.info(
+                    "Fixed %s and staging as %s" % (roof_data_file_name, file_name)
+                )
+                file_name = f"{roof_data_file_name.split('.')[0]}_fixed.json"
             else:
-                roof_json_data_files.append(roof_data_file_name)
+                logger.info("Staging %s" % file_name)
+                file_name = roof_data_file_name
+
+            # Stage file
+            with open(f"{new_source_base_dir}/{file_name}", "w") as file:
+                json.dump(json.loads(json_str), file)
+
+        logger.info("All JSON files have been staged.")
+
+
+def fix_string_nulls(df: DataFrame) -> DataFrame:
+    """
+    Replace potential str representations of NULL with actual NULL
+    for all string columns
+    """
+    for column_name, data_type in df.dtypes:
+        if data_type == "string":
+            df = df.withColumn(
+                column_name,
+                F.when(
+                    condition=F.lower(F.col(column_name)).isin(["none", "null"]),
+                    value=None,
+                ).otherwise(F.col(column_name)),
+            )
+    return df
 
 
 def read_and_parse_json_data(
-    spark: SparkSession, base_dir: str, json_files: List[str], logger: logging.Logger
+    spark: SparkSession, base_dir: str, logger: logging.Logger
 ) -> Dict[str, DataFrame]:
     """
     Iterate to read in each JSON file,
     parse/split into separate Spark dataframes,
-    and return as a dictionary
+    and return as a dictionary.
 
     E.g.,
     {
-        "table_name1":
-        df1
+        "table1": df1,
+        "table2": df2
     }
     """
     # In manual review, roof_8.json is a good candidate to determine the expected JSON structure
@@ -117,8 +141,10 @@ def read_and_parse_json_data(
         .withColumn("source_file_name", F.lit(""))
     )
 
-    # Iterate to read each JSON file a Spark dataframe and union together
-    for iteration, roof_data_file_name in enumerate(iterable=json_files, start=1):
+    # Iterate to read each JSON file as a Spark dataframe based on the expected schema and union together
+    for iteration, roof_data_file_name in enumerate(
+        iterable=os.listdir(base_dir), start=1
+    ):
         json_path = f"{base_dir}/{roof_data_file_name}"
         logger.info("%s: Preparing to read %s" % (iteration, roof_data_file_name))
 
@@ -129,7 +155,7 @@ def read_and_parse_json_data(
         # Union/append base df
         roof_data_df = roof_data_df.union(json_file_df)
 
-    # 9 records from 9 non-malformed JSON files
+    # Cache to reuse
     roof_data_df.cache()
 
     # Sample output:
@@ -509,28 +535,31 @@ def read_and_parse_json_data(
         .distinct()
     )
 
-    roof_dfs = dict(
-        roof=roof_df,
-        building_mounting_plane=building_mounting_plane_df,
-        building_mounting_plane_penetration=building_mounting_plane_penetration_df,
-        building_mounting_plane_penetration_ring_edge=building_mounting_plane_penetration_ring_edge_df,
-        building_mounting_plane_polygon_exterior_ring=building_mounting_plane_polygon_exterior_ring_df,
-        building_mounting_plane_polygon_interior_ring_edge=building_mounting_plane_polygon_interior_ring_edge_df,
-        site_model_obstruction=site_model_obstruction_df,
-        site_model_obstruction_ring_edge=site_model_obstruction_ring_edge_df,
-    )
+    roof_dfs = {
+        "1_roof": roof_df,
+        "2_building_mounting_plane": building_mounting_plane_df,
+        "3_building_mounting_plane_penetration": building_mounting_plane_penetration_df,
+        "4_building_mounting_plane_penetration_ring_edge": building_mounting_plane_penetration_ring_edge_df,
+        "5_building_mounting_plane_polygon_exterior_ring": building_mounting_plane_polygon_exterior_ring_df,
+        "6_building_mounting_plane_polygon_interior_ring_edge": building_mounting_plane_polygon_interior_ring_edge_df,
+        "7_site_model_obstruction": site_model_obstruction_df,
+        "8_site_model_obstruction_ring_edge": site_model_obstruction_ring_edge_df,
+    }
 
     return roof_dfs
 
 
-def write_to_file(table_names_and_dfs: Dict[str, DataFrame]) -> NoReturn:
+def write_to_file(
+    table_names_and_dfs: Dict[str, DataFrame], logger: logging.Logger
+) -> NoReturn:
     """
     Simulate writing each dataframe to a table by instead writing locally as CSV
     """
-    # Relative path
+    # Relative output path
     output_dir = "output_data"
 
     for output_sub_folder, df in table_names_and_dfs.items():
+        logger.info("Writing out data to %s" % output_sub_folder)
         (
             # One output file per dataframe due to small size
             df.coalesce(1)
@@ -540,20 +569,27 @@ def write_to_file(table_names_and_dfs: Dict[str, DataFrame]) -> NoReturn:
             .csv(f"{output_dir}/{output_sub_folder}")
         )
 
+    logger.info("All data has been written successfully.")
+
 
 def main():
     start_time = datetime.now()
 
     spark = get_spark_session()
-    logger = logging.getLogger("ingest_roof")
-    # Relative path
-    base_dir = "roof_data"
+    logger = get_logger()
 
-    json_file_list = fix_json_files(base_dir=base_dir, logger=logger)
-    names_and_dfs = read_and_parse_json_data(
-        spark=spark, base_dir=base_dir, json_files=json_file_list
+    source_base_dir = "roof_data"
+    new_source_base_dir = "roof_data_fixed"
+
+    fix_and_stage_son_files(
+        source_base_dir=source_base_dir,
+        new_source_base_dir=new_source_base_dir,
+        logger=logger,
     )
-    write_to_file(table_names_and_dfs=names_and_dfs)
+    names_and_dfs = read_and_parse_json_data(
+        spark=spark, base_dir=new_source_base_dir, logger=logger
+    )
+    write_to_file(table_names_and_dfs=names_and_dfs, logger=logger)
 
     end_time = datetime.now()
     execution_time = round(number=(end_time - start_time).total_seconds(), ndigits=2)
